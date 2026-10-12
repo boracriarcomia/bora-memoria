@@ -45,3 +45,132 @@ body{background:#f6f5fa}main{padding:18px 20px;max-width:none!important}.workspa
 #notes summary{font-size:15px}#notes summary small{font-size:12px}#reading{font-size:16px;line-height:1.65;max-height:calc(100vh - 240px)}#reading button{font-size:14px}.activity-task small,.activity-heading small,.activity-card-top,.activity-card p,.activity-filter,#allTasks,#activityUpdate{font-size:13px}.folder-tools button,#collapseFolders{font-size:13px}
 .note-folder>summary{font-size:15px;line-height:1.5;padding:8px 5px}.note-folder>summary small{font-size:12px}.note-reading table,#reading table{width:100%;border-collapse:collapse;font-size:14px;overflow-wrap:anywhere}#reading th,#reading td{border-bottom:1px solid var(--line);padding:9px 6px;text-align:left}#reading th{font-weight:600;color:#625b72}#reading figure{margin:14px 0}#reading figcaption{font-size:12px;color:var(--muted)}#reading figure:has(img[alt*="clara"]){background:#302540;border-radius:8px;padding:12px}#reading figure:has(img[alt*="clara"]) figcaption{color:#e6def2}
 body{font-size:16px;color:#292438}aside{width:280px;padding:18px 16px}.search{font-size:14px;color:#625b72;margin-top:16px}.search input{font-size:16px;padding:10px}.list-title{font-size:12px;letter-spacing:.7px;margin-top:18px}#notes button{font-size:15px;line-height:1.45;padding:9px 8px}#notes small{font-size:12px}.folder-row,.folder-name{font-size:15px}.aside-bottom button,.aside-bottom summary,.calendar-menu{font-size:14px}.workspace{grid-template-columns:minmax(0,1fr) 380px;gap:12px}main{padding:16px}.panel-heading h2{font-size:19px}.panel-heading button,.map-tools button,.map-label-choice,.map-label-choice select{font-size:13px}.workspace-tabs button{font-size:15px}.activity-card>strong,.activity-task strong{font-size:14px}.activity-task .task-evidence,.activity-card small,.activity-history summary{font-size:13px}.note-reading{font-size:16px;line-height:1.65}.editor-panel textarea{font-size:16px}.editor-panel label,#status,#related,.edit-actions button{font-size:13px}.map-footer{font-size:12px}#notes{max-height:none;min-height:140px}.calendar-grid{font-size:13px}dialog p,dialog li,dialog label,dialog input,dialog select,dialog textarea{font-size:16px}@media(max-width:1250px){aside{width:245px}.workspace{grid-template-columns:minmax(0,1fr) 330px}}@media(max-width:1000px){.workspace{grid-template-columns:1fr}.editor-panel{min-height:380px}}@media(max-width:650px){aside{width:100%}#notes{max-height:220px}}
+/* Transient export confirmation; no permanent banner. */
+.export-toast,#notice.system-toast{position:fixed;right:24px;bottom:24px;z-index:1000;max-width:min(460px,calc(100vw - 48px));padding:18px 50px 18px 22px;margin:0;border:1px solid #76658c;border-radius:16px;background:#272137;color:#fff;box-shadow:0 8px 30px #0003;overflow-wrap:anywhere;animation:toast-in .2s ease-out;}
+.toast-close{position:absolute;right:8px;top:8px;min-height:30px;padding:2px 9px;border:0;background:transparent;color:inherit;font-size:22px}
+.export-toast[hidden]{display:none;}
+@keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.export-toast,#notice.system-toast{animation:none}}
+.task-meta{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0}.task-meta .activity-tag{margin:0;font-size:12px}.activity-task>small{display:block;font-size:13px;line-height:1.55;margin-top:4px}.activity-task.completed .task-meta .activity-tag{background:#e9f6ee;color:#168154}
+#activeTasks{min-width:0;grid-template-columns:minmax(0,1fr)}#activeTasks>*,.activity-task{min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal}#activityPanel{overflow-x:hidden}.activity-heading>*{min-width:0}
+#activeTasks .agent-working{display:flex;align-items:center;gap:10px}
+.agent-working-dots{display:inline-flex;gap:3px;flex:none}
+.agent-working-dots span{width:5px;height:5px;background:#6d28d9;border-radius:50%;animation:bora-thinking 1.5s ease-in-out infinite}
+.agent-working-dots span:nth-child(2){animation-delay:.2s}
+.agent-working-dots span:nth-child(3){animation-delay:.4s}
+@keyframes bora-thinking{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
+@media(prefers-reduced-motion:reduce){.agent-working-dots span{animation:none;opacity:.8}}
+
+#dialogcontent.backup-panel{overflow-wrap:anywhere}#dialogcontent.backup-panel>div>button{white-space:normal}
+
+/* Appearance and quiet, curved connections. */
+:root{color-scheme:light;--map-link:#7d8eaa;--map-label:#514066}
+html[data-theme="dark"]{color-scheme:dark;--ink:#eee9f7;--muted:#b4acc5;--purple:#b69aff;--line:#41394e;--paper:#221e2b;--bg:#17141d;--green:#7cd8b6;--map-link:#b6acd0;--map-label:#e0d3f4}
+body{color:var(--ink);background:var(--bg)}
+.theme-choice{display:grid;gap:6px;padding:8px 7px;font-size:13px;color:var(--muted)}
+.theme-choice select{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink)}
+#map text{fill:var(--map-label)}
+#map path{transition:opacity .14s;stroke:var(--map-link);stroke-width:.65;stroke-opacity:.3}
+#map .map-folder-link{stroke-dasharray:2 5;stroke-opacity:.35;stroke-width:.65}
+#map .map-link-highlight{stroke:var(--purple);stroke-opacity:.85;stroke-width:1.1}
+#map .map-idea-link.map-link-highlight{stroke-dasharray:7 3;animation:bora-link-pulse 1.4s linear infinite}
+@keyframes bora-link-pulse{from{stroke-dashoffset:10}to{stroke-dashoffset:0}}
+.map-footer{flex-wrap:wrap}.map-legend{font-size:11px;color:var(--muted)}
+html[data-theme="dark"] aside,html[data-theme="dark"] button,html[data-theme="dark"] input,html[data-theme="dark"] textarea,html[data-theme="dark"] select,html[data-theme="dark"] dialog,html[data-theme="dark"] .editor-panel,html[data-theme="dark"] .project-strip{background:var(--paper);color:var(--ink);border-color:var(--line)}
+html[data-theme="dark"] .map-panel,html[data-theme="dark"] #map{background:radial-gradient(ellipse at center,#2d223d 0%,#211c2a 75%)}
+html[data-theme="dark"] #map .node text{fill:var(--map-label);stroke:#211c2a}
+html[data-theme="dark"] .primary,html[data-theme="dark"] .calendar-grid .today{background:#7040cc;color:#fff;border-color:#9467e6}
+html[data-theme="dark"] button:hover,html[data-theme="dark"] #notes button.active{background:#37294b;color:#e4d5ff}
+html[data-theme="dark"] #notes button{color:var(--ink)}
+html[data-theme="dark"] .folderbar,html[data-theme="dark"] .activity-task,html[data-theme="dark"] .activity-card,html[data-theme="dark"] .activity-tag,html[data-theme="dark"] .activity-task.completed .activity-tag,html[data-theme="dark"] #reading pre{background:#2c2637;color:var(--ink);border-color:var(--line)}
+html[data-theme="dark"] dialog p,html[data-theme="dark"] dialog li,html[data-theme="dark"] .search,html[data-theme="dark"] #reading th,html[data-theme="dark"] .calendar-menu summary{color:var(--muted)}
+html[data-theme="dark"] #notice{background:#3e321f;color:#f5d89f;border-color:#78603a}
+html[data-theme="dark"] .badge{background:#20382f;color:var(--green);border-color:#375849}
+html[data-theme="dark"] #status.dirty{color:#f0c582}html[data-theme="dark"] #status.error{color:#ff9baa}
+html[data-theme="dark"] .agent-working-dots span{background:var(--purple)}
+@media(prefers-reduced-motion:reduce){#map path{transition:none}#map .map-idea-link.map-link-highlight{animation:none}}
+
+.theme-toggle{align-self:flex-end;border-radius:999px;padding:7px 13px;margin:0 0 12px;font-weight:600;min-width:100px}.theme-toggle:focus-visible{outline:2px solid var(--accent,#6d28d9);outline-offset:3px}
+
+/* Keep the tree useful while expanded menus remain independently scrollable. */
+aside{width:290px;padding:18px 18px;overflow:hidden;gap:6px}
+.brand{font-size:20px}.brand strong{font-size:24px}.brand img{width:48px;height:52px}
+.theme-toggle{align-self:flex-end;margin:-44px 0 14px;padding:6px 10px;min-width:80px;font-size:13px}
+.search{margin-top:8px;font-size:14px}.search input{margin-top:4px;padding:9px 11px;font-size:16px}
+.list-title{margin:10px 3px 4px;letter-spacing:.8px}
+#notes{flex:1 1 260px;min-height:160px;overflow:auto}
+#notes button{padding:7px 9px;font-size:15px}
+.aside-bottom{flex:0 1 auto;max-height:28vh;overflow:auto;margin-top:4px;padding-top:6px}
+.aside-bottom summary,.calendar-menu summary{padding:7px;font-size:14px}
+.aside-bottom button{font-size:14px;padding:7px}
+#collapseFolders{padding:5px 9px;font-size:13px}
+@media(max-height:760px){aside{padding:12px 14px;gap:4px}.brand img{height:44px}.search{margin-top:4px}#notes{min-height:140px}.aside-bottom{max-height:25vh}}
+
+/* Folder labels remain legible while connected nodes are highlighted. */
+#map .node text,#map .node:hover text,#map .node:focus text{opacity:1;fill:var(--map-label);font-weight:400;paint-order:stroke;stroke-width:1px;pointer-events:auto}
+html[data-theme="dark"] #map .node text,html[data-theme="dark"] #map .node:hover text,html[data-theme="dark"] #map .node:focus text{fill:#eee8fa;stroke:#211c2a}
+#map .node.map-dimmed{opacity:.4}#map .node:hover,#map .node:focus{opacity:1}
+#map .map-link-highlight{stroke-width:.65}
+html[data-theme="dark"] .workspace-tabs button[aria-selected="true"],html[data-theme="dark"] .workspace-tabs button[aria-selected="true"]:hover{background:#5c3390;color:#fff;border-color:#aa82df;font-weight:650}
+#guidancePanel{max-height:calc(100vh - 115px);overflow:auto;padding-right:6px}#guidancePanel input{width:100%;margin:8px 0} .workspace-tabs{flex-wrap:wrap}
+#guidancePanel:not([hidden]){display:flex;flex-direction:column;gap:14px;padding:16px 2px 20px}
+#guidancePanel h3,#guidancePanel p{margin:0}
+#guidancePanel>label{margin:0;font-size:14px}
+#guidancePanel input{margin:0;padding:11px 12px;min-height:44px;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:10px}
+#guidanceList{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0}
+#guidanceList .activity-task{display:flex;flex-direction:column;gap:8px;text-align:left;padding:14px;margin:0;width:100%;min-height:74px;border:1px solid var(--line);border-radius:12px}
+#guidanceList .activity-task strong{font-size:15px;line-height:1.45}
+#guidanceList .activity-task small{margin:0;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.workspace-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding-bottom:14px}
+.workspace-tabs button{min-height:44px;padding:9px 6px;white-space:normal}
+.activity-actions,.edit-actions,.editor-bottom{gap:10px;flex-wrap:wrap}
+/* Consulted references belong to each active participant. */
+.guidance-in-use { text-align:left; white-space:normal; overflow-wrap:anywhere; font-size:14px; padding:9px 12px; margin-top:8px; }
+.ai-console{margin:0 0 14px;border:1px solid #41394e;border-radius:12px;background:#15121c;color:#e5dff0;overflow:hidden;padding:12px;font:13px/1.55 Consolas,'Cascadia Mono',monospace}
+.ai-console header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;font:14px/1.4 'Segoe UI',sans-serif}
+.ai-console header span,.ai-console>small{color:#aaa2bc;font-size:12px}
+#aiConsoleLines{max-height:190px;overflow:auto;display:grid;gap:7px;min-width:0}
+.console-line{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:start;overflow-wrap:anywhere}
+.console-state{color:#8bc8ff;font-size:11px;padding-top:2px}.console-active .console-state{color:#90e0ba}
+.console-line time{color:#aaa2bc;font-size:11px}.ai-console>small{display:block;margin-top:9px}
+.console-execution-motion{display:flex;margin-top:5px;gap:3px}.console-execution-motion span{background:#90e0ba;width:4px;height:4px;animation-duration:1.8s}
+#guidanceUsage{display:grid;gap:8px}#guidanceUsage:empty{display:none}
+.map-panel{position:relative;min-width:0}.map-panel .panel-heading{padding:0;align-items:center;gap:10px;margin-bottom:8px}
+.map-panel .panel-heading>div{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px}
+.map-panel h2{font-size:20px;margin:0}.map-label-choice{margin:0;font-size:13px;gap:6px}
+.map-label-choice select{padding:6px 8px;font-size:13px}.map-tools{margin:0 0 6px;gap:6px;display:flex}
+.map-tools button,.map-panel #focus{padding:6px 10px;font-size:13px}
+.activity-heading{align-items:center;gap:10px}.activity-heading strong{font-size:16px}.activity-heading small{font-size:12px}
+#guidancePanel:not([hidden]){gap:10px;padding-top:8px}#guidancePanel h3{font-size:17px}
+#guidanceList .activity-task{min-height:0;padding:11px;gap:4px}#guidanceList .activity-task small{display:none}
+.editor-panel{min-width:0}.workspace-tabs{padding-bottom:10px}.workspace-tabs button{min-height:40px}
+
+.activity-task.cancelled strong,.task-row.cancelled strong{color:#b42339;text-decoration:line-through}
+html[data-theme="dark"] .activity-task.cancelled strong,html[data-theme="dark"] .task-row.cancelled strong{color:#ff9bab}
+.activity-task.cancelled,.task-row.cancelled{border-color:#b4233955}
+.activity-task.superseded strong,.task-row.superseded strong{text-decoration:line-through;color:var(--muted)}
+
+/* Shared spacing for the map and AI monitor, including narrow windows. */
+.workspace{gap:18px}
+.map-panel .panel-heading{gap:12px;align-items:flex-start;padding:4px 2px 10px;flex-wrap:wrap}
+.map-panel .panel-heading>div{flex:1 1 360px;gap:10px 20px;min-width:0}
+.map-panel h2{line-height:1.35}
+.map-label-choice{flex-wrap:wrap;gap:8px;line-height:1.5}
+.map-tools{gap:8px;margin:0 0 12px;padding-left:2px}
+.ai-console{padding:16px;margin-bottom:20px;line-height:1.65}
+.ai-console header{gap:8px 14px;flex-wrap:wrap;margin-bottom:12px;line-height:1.5}
+#aiConsoleLines{padding-right:10px;scrollbar-gutter:stable;gap:0}
+.console-line{grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;padding:9px 0;min-width:0;border-bottom:1px solid #76658c33}
+.console-line:last-child{border-bottom:0}
+.console-state{grid-column:1;grid-row:1;display:flex;align-items:center;gap:9px;padding:0;line-height:1.5}
+.console-description{grid-column:1/-1;grid-row:2;min-width:0;line-height:1.65;overflow-wrap:anywhere}
+.console-line time{grid-column:2;grid-row:1;line-height:1.5;padding:0;white-space:nowrap}
+.console-execution-motion{margin:0;display:inline-flex;flex-shrink:0}
+.ai-console>small{margin-top:12px;line-height:1.6}
+.workspace-tabs{gap:10px;padding-bottom:14px;margin-bottom:6px}
+.activity-heading{padding:6px 0;flex-wrap:wrap;gap:8px 14px}
+html[data-theme="dark"] #notes summary:hover,
+html[data-theme="dark"] #notes summary:focus-visible,
+html[data-theme="dark"] .app-menu>summary:hover{background:#37294b;color:var(--ink)}
+html[data-theme="dark"] #notes summary:hover small{color:#c6bbdb}
+#notes summary:focus-visible{outline:2px solid var(--purple);outline-offset:-2px}
