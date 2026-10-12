@@ -26,10 +26,10 @@ Section "Bora Memória"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
   File /oname=Bora-Memoria.exe "dist\Bora-Memoria-v04.exe"
-  File "LEIA-ME.md"
-  File "INTEGRACAO-IA.md"
-  File "COFRE-E-PERFIS.md"
-  File "FLUXO-E-CRITERIOS.md"
+  File /oname=LEIA-ME.md "docs\INSTALACAO.md"
+  File "docs\INTEGRACAO-IA.md"
+  File "docs\COFRE-E-PERFIS.md"
+  File "docs\FLUXO-E-CRITERIOS.md"
   SetOverwrite ifnewer
   File /oname=Bora-Memoria-MCP.exe "${MCP_BINARY}"
   SetOverwrite on
