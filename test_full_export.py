@@ -23,11 +23,14 @@ class FullExportTest(unittest.TestCase):
                     raw = z.read('cofre/' + item['path'])
                     self.assertEqual(hashlib.sha256(raw).hexdigest(), item['sha256'])
                 for name, raw in expected.items():
+                    if name.endswith(('tasks.sqlite3', 'tasks.sqlite3-wal', 'tasks.sqlite3-shm')):
+                        continue  # SQLite backup preserves data, not physical page layout.
                     self.assertEqual(z.read('cofre/' + name), raw)
                 z.extractall(Path(base, 'restored'))
             restored = Vault(Path(base, 'restored/cofre'))
             self.assertEqual(restored.state()['notes'][0]['body'], v.state()['notes'][0]['body'])
             self.assertEqual(restored.activities()['events'], v.activities()['events'])
+            self.assertEqual(restored.tasks(), v.tasks())
             self.assertNotEqual(result['path'], v.export_full(Path(base, 'Downloads'))['path'])
 
     def test_export_does_not_write_inside_vault(self):

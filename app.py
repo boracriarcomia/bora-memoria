@@ -1,4 +1,6 @@
 """Bora Notas: local Markdown files, loopback UI, no external services."""
+from backup_service import BackupService, BackupError
+from drive_api import DriveError, credentials_root
 import argparse
 import base64
 from datetime import datetime, timezone
@@ -202,12 +204,14 @@ class Vault:
             return result
 
     def private_dir(self, kind):
-        folder = self.root / '.bora' / kind
-        for p in [self.root / '.bora', folder]:
-            if p.is_symlink() or (p.exists() and not p.is_dir()) or not p.resolve().is_relative_to(self.root):
-                raise Problem('Pasta auxiliar insegura; operação cancelada.')
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder
+        # UI status and backup worker can request a directory simultaneously.
+        with self.lock:
+            folder = self.root / '.bora' / kind
+            for p in [self.root / '.bora', folder]:
+                if p.is_symlink() or (p.exists() and not p.is_dir()) or not p.resolve().is_relative_to(self.root):
+                    raise Problem('Pasta auxiliar insegura; operação cancelada.')
+            folder.mkdir(parents=True, exist_ok=True)
+            return folder
 
     def keep_previous(self, name, raw):
         key = digest(name.encode())[:16]
@@ -236,7 +240,14 @@ class Vault:
                 stage, action = value.get('stage', ''), value.get('action', '')
                 if not isinstance(stage, str) or not isinstance(action, str) or len(stage) > 120 or len(action) > 240:
                     raise Problem('Etapa ou ação acima do limite.')
-                atomic(path, json.dumps(dict(positions=clean, stage=stage, action=action), ensure_ascii=False).encode('utf-8'))
+                previous = json.loads(path.read_text('utf-8')) if path.exists() else {}
+                theme = value.get('theme', previous.get('theme', 'system'))
+                if theme not in ('light', 'dark', 'system'):
+                    raise Problem('Tema inválido.')
+                updated = dict(positions=clean, stage=stage, action=action)
+                if 'theme' in value or 'theme' in previous:
+                    updated['theme'] = theme
+                atomic(path, json.dumps(updated, ensure_ascii=False).encode('utf-8'))
             if not path.exists():
                 return dict(positions={}, stage='', action='')
             if path.stat().st_size > 200000:
@@ -281,12 +292,18 @@ class Vault:
             if item['note']:
                 self.path(item['note'])
             item['state'] = task.get('state', 'pending')
-            if item['state'] not in ['pending', 'doing', 'blocked', 'done']:
+            if item['state'] not in ['pending', 'doing', 'blocked', 'done', 'awaiting_review', 'cancelled', 'superseded']:
                 raise Problem('Estado da tarefa inválido.')
             deps = task.get('depends', [])
             if not isinstance(deps, list) or len(deps) > 500 or any(not isinstance(d, str) for d in deps) or len(set(deps)) != len(deps) or tid in deps:
                 raise Problem('Dependências inválidas.')
             item['depends'] = deps
+            item['priority'] = task.get('priority', 'normal')
+            if item['priority'] not in ['urgent', 'high', 'normal', 'low']:
+                raise Problem('Prioridade inválida.')
+            item['acceptance'] = task.get('acceptance', '')
+            if not isinstance(item['acceptance'], str) or len(item['acceptance']) > 2000:
+                raise Problem('Critério de conclusão inválido.')
             if item['state'] == 'done' and not item['evidence']:
                 raise Problem('Registre evidência antes de concluir a tarefa.')
             clean.append(item)
@@ -330,7 +347,7 @@ class Vault:
         if len(clean_folders) > 200:
             raise Problem('Limite de 200 pastas contando subpastas.')
         clean_notes = {}
-        categories = {'general', 'community', 'continuity', 'youtube', 'instagram', 'brand', 'content', 'projects'}
+        categories = {'general', 'community', 'continuity', 'youtube', 'instagram', 'brand', 'content', 'projects', 'guidance'}
         for name, info in notes.items():
             self.path(name)
             if not isinstance(info, dict):
@@ -395,6 +412,8 @@ class Vault:
             self.activities()
             config = self.private_dir('config')
             snapshots = {p:p.read_bytes() for p in config.glob('*.json') if not p.is_symlink()}
+            original_tasks = self.tasks()
+            task_reference_changed = False
             self.keep_previous(name, raw)
             self.folder_path(folder, create=True)
             with destination.open('xb') as f:
@@ -408,9 +427,6 @@ class Vault:
                     data = json.loads(before)
                     if path.name == 'view.json' and name in data.get('positions', {}):
                         data['positions'][new_name] = data['positions'].pop(name)
-                    if path.name == 'tasks.json':
-                        for task in data.get('tasks', []):
-                            if task.get('note') == name: task['note'] = new_name
                     if path.name == 'activity.json':
                         if name in data.get('observed', {}): data['observed'][new_name] = data['observed'].pop(name)
                         for event in data.get('events', []):
@@ -425,8 +441,14 @@ class Vault:
                             parent = '/'.join(folder.split('/')[:i])
                             if parent and parent not in data['folders']: data['folders'].append(parent)
                     atomic(path, json.dumps(data, ensure_ascii=False).encode('utf-8'))
+                updated_tasks = [dict(t, note=new_name) if t['note'] == name else t for t in original_tasks['tasks']]
+                if updated_tasks != original_tasks['tasks']:
+                    self.tasks(dict(revision=original_tasks['revision'], tasks=updated_tasks))
+                    task_reference_changed = True
                 source.unlink()
             except Exception:
+                if task_reference_changed:
+                    self.tasks(dict(revision=self.tasks()['revision'], tasks=original_tasks['tasks']))
                 for path, before in snapshots.items(): atomic(path, before)
                 destination.unlink()
                 raise
@@ -522,43 +544,22 @@ class Vault:
                 self.path(e['note'])
         return events
 
+    def task_store(self):
+        from task_store import TaskStore
+        return TaskStore(self.private_dir('config'), self.validate_tasks, Problem)
+
     def tasks(self, payload=None):
         with self.lock:
-            path = self.private_dir('config') / 'tasks.json'
-            if path.is_symlink():
-                raise Problem('Arquivo de tarefas inseguro.')
-            raw = path.read_bytes() if path.exists() else b''
-            if len(raw) > 2000000:
-                raise Problem('Arquivo de tarefas acima do limite.')
-            existing = json.loads(raw) if raw else dict(version=1, tasks=[], history=[])
-            # Also validate data edited by an external tool.
-            old = self.validate_tasks(existing.get('tasks'))
+            previous = self.task_store().tasks() if payload is not None else None
             if payload is not None:
-                if payload.get('revision') != digest(raw):
-                    raise Problem('Tarefas alteradas fora desta tela. Recarregue antes de salvar.', 409)
-                tasks = self.validate_tasks(payload.get('tasks'))
-                timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
-                previous = {t['id']: t for t in old}
-                history = existing.get('history', [])
-                if not isinstance(history, list):
-                    history = []
-                for t in tasks:
-                    if previous.get(t['id']) != t:
-                        history.append(dict(task=t['id'], title=t['title'], state=t['state'], evidence=t['evidence'], at=timestamp))
-                removed = set(previous) - {t['id'] for t in tasks}
-                for tid in removed:
-                    history.append(dict(task=tid, title=previous[tid]['title'], state='removed', at=timestamp))
-                data = dict(version=1, tasks=tasks, history=history[-200:])
-                encoded = json.dumps(data, ensure_ascii=False).encode('utf-8')
-                if len(encoded) > 2000000:
-                    raise Problem('Tarefas e histórico acima do limite.')
                 self.activities()
-                atomic(path, encoded)
-                events = [dict(kind='task_changed', title=t['title'], task=t['id'], note=t['note'], source='app', state=t['state'], evidence=t['evidence']) for t in tasks if previous.get(t['id']) != t]
-                if events:
-                    self.activities(event=events)
-                raw, existing, old = encoded, data, tasks
-            return dict(version=1, tasks=old, history=existing.get('history', [])[-200:], revision=digest(raw))
+            result = self.task_store().tasks(payload)
+            if payload is not None:
+                old = {t['id']: t for t in previous['tasks']}
+                events = [dict(kind='task_changed', title=t['title'], task=t['id'], note=t['note'], source='app', state=t['state'], evidence=t['evidence']) for t in result['tasks'] if old.get(t['id']) != t]
+                self.activities(event=events)
+            result['execution'] = self.task_store().active()
+            return result
 
     def delete(self, payload):
         if payload.get('confirmed') is not True:
@@ -597,12 +598,15 @@ class Vault:
 
     def export_full(self, downloads=None):
         """Export the whole portable vault to disk, without browser download limits."""
-        destination = Path(downloads) if downloads is not None else Path.home() / 'Downloads'
-        destination.mkdir(parents=True, exist_ok=True)
+        if credentials_root().resolve().is_relative_to(self.root):
+            raise Problem('O cofre contém o local privado de credenciais. Escolha um cofre separado antes de exportar.')
+        destination = Path(downloads) if downloads is not None else self.root.parent / 'Bora-Memoria-backups'
         if destination.resolve().is_relative_to(self.root):
-            raise Problem('Escolha Downloads fora do cofre para exportar.')
+            raise Problem('Escolha uma pasta fora do cofre para exportar.')
+        destination.mkdir(parents=True, exist_ok=True)
         with self.lock:
             self.activities()
+            database_snapshot = self.task_store().snapshot()
             files = []
             for folder, dirs, names in os.walk(self.root, followlinks=False):
                 for name in dirs + names:
@@ -616,18 +620,32 @@ class Vault:
             os.close(fd)
             try:
                 manifest = []
+                observed = {}
                 with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as archive:
                     for p in sorted(files):
+                        if p.name in {'tasks.sqlite3-wal', 'tasks.sqlite3-shm'} and p.parent == self.root / '.bora/config':
+                            continue
                         before = p.stat()
-                        raw = p.read_bytes()
+                        is_database = p == self.root / '.bora/config/tasks.sqlite3'
+                        raw = database_snapshot if is_database else p.read_bytes()
                         after = p.stat()
-                        if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+                        if not is_database and (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
                             raise Problem('Arquivo alterado durante a exportação. Tente novamente.')
+                        if not is_database:
+                            observed[p] = (after.st_mtime_ns, after.st_size)
                         rel = p.relative_to(self.root).as_posix()
                         archive.writestr('cofre/' + rel, raw)
                         manifest.append(dict(path=rel, bytes=len(raw), sha256=digest(raw)))
                     archive.writestr('manifesto.json', json.dumps(dict(format='bora-cofre-completo', version=1, files=manifest), ensure_ascii=False))
                     archive.writestr('LEIA-ME.txt', 'Extraia este ZIP e abra a pasta cofre no Bora Memória. Ela contém notas, anexos, atividades, tarefas e configurações. Não use Restaurar backup de notas para este arquivo. Guarde uma cópia em outro dispositivo.\n')
+                current_files = {p for p in self.root.rglob('*') if p.is_file() and p.name not in {'tasks.sqlite3-wal', 'tasks.sqlite3-shm'}}
+                expected_files = {p for p in files if p.name not in {'tasks.sqlite3-wal', 'tasks.sqlite3-shm'}}
+                if current_files != expected_files:
+                    raise Problem('O cofre mudou durante a exportação. Tente novamente.')
+                for p, signature in observed.items():
+                    stat = p.stat()
+                    if p.is_symlink() or (stat.st_mtime_ns, stat.st_size) != signature:
+                        raise Problem('Arquivo alterado durante a exportação. Tente novamente.')
                 with zipfile.ZipFile(temporary) as archive:
                     if archive.testzip() is not None:
                         raise Problem('Falha ao conferir a exportação.')
@@ -635,7 +653,7 @@ class Vault:
             finally:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
-            return dict(ok=True, path=str(target), files=len(files), message='Seus dados foram exportados para Downloads: ' + target.name + '. Extraia o ZIP e abra a pasta cofre para recuperar sua base.')
+            return dict(ok=True, path=str(target), files=len(manifest), message='Cópia de segurança salva em ' + str(target) + '. Extraia o ZIP e abra a pasta cofre para recuperar sua base.')
 
     def backup(self):
         with self.lock:
@@ -724,7 +742,7 @@ class Vault:
                                 self.view(manifest['view'])
                         except (ValueError, Problem, OSError):
                             pass  # Invalid optional presentation data never modifies notes.
-                    if 'bora-backup.json' in z.namelist() and not (self.root / '.bora/config/tasks.json').exists():
+                    if 'bora-backup.json' in z.namelist() and not self.tasks()['tasks']:
                         try:
                             manifest = json.loads(z.read('bora-backup.json'))
                             if isinstance(manifest, dict) and 'tasks' in manifest:
@@ -755,6 +773,16 @@ def choose_folder():
     result = filedialog.askdirectory(title='Bora Notas — escolha ou crie uma pasta para suas notas', mustexist=True)
     root.destroy()
     return result
+
+
+def choose_oauth_file():
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk(); root.withdraw()
+    try:
+        return filedialog.askopenfilename(title='Configuração Google OAuth Desktop', filetypes=[('Google OAuth JSON', '*.json')])
+    finally:
+        root.destroy()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -793,25 +821,37 @@ class Handler(BaseHTTPRequestHandler):
                 return self.answer(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
             except (Problem,OSError) as e:
                 return self.answer(getattr(e,'status',400),dict(error=str(e)))
-        if self.path in ['/api/state', '/api/backup', '/api/view', '/api/tasks', '/api/activities', '/api/organization']:
+        if self.path in ['/api/state', '/api/backup', '/api/view', '/api/tasks', '/api/activities', '/api/organization', '/api/backup-state', '/api/project-state']:
             if not self.authenticated():
                 return self.answer(403, dict(error='Abra pelo aplicativo Bora Notas.'))
             try:
+                if self.path == '/api/backup-state':
+                    return self.answer(200, self.server.backups.state())
                 if self.path == '/api/state':
                     return self.answer(200, self.server.vault.state())
                 if self.path == '/api/view':
                     return self.answer(200, self.server.vault.view())
                 if self.path == '/api/tasks':
-                    return self.answer(200, self.server.vault.tasks())
+                    from project_workflow import ProjectWorkflow
+                    result=self.server.vault.tasks()
+                    flow=ProjectWorkflow(self.server.vault)
+                    result['governance']={t['id']:flow.contract(t['id']) for t in result['tasks']}
+                    return self.answer(200, result)
+                if self.path == '/api/project-state':
+                    from project_workflow import ProjectWorkflow
+                    return self.answer(200, ProjectWorkflow(self.server.vault).context())
                 if self.path == '/api/activities':
                     return self.answer(200, self.server.vault.activities())
                 if self.path == '/api/organization':
                     return self.answer(200, self.server.vault.organization())
                 return self.answer(200, self.server.vault.backup(), 'application/zip', {'Content-Disposition': 'attachment; filename="Bora-Notas-backup.zip"'})
-            except (Problem, OSError) as e:
+            except (Problem, OSError, ValueError) as e:
                 return self.answer(getattr(e, 'status', 400), dict(error=str(e)))
-        files = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/graph.js': ('graph.js', 'text/javascript; charset=utf-8'), '/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'), '/tasks.js': ('tasks.js', 'text/javascript; charset=utf-8'), '/activities.js': ('activities.js', 'text/javascript; charset=utf-8'), '/organization.js': ('organization.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/logo.png': ('logo.png', 'image/png')}
+        files = {'/logo-light.png': ('logo-light.png', 'image/png'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/graph.js': ('graph.js', 'text/javascript; charset=utf-8'), '/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'), '/tasks.js': ('tasks.js', 'text/javascript; charset=utf-8'), '/activities.js': ('activities.js', 'text/javascript; charset=utf-8'), '/organization.js': ('organization.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/logo.png': ('logo.png', 'image/png')}
+        files.update({'/project-state.js':('project-state.js','text/javascript; charset=utf-8'),'/project-templates.js':('project-templates.js','text/javascript; charset=utf-8')})
         if self.path not in files:
+            if self.path == '/project-templates.js':
+                return self.answer(200, (ASSETS / 'project-templates.js').read_bytes(), 'text/javascript; charset=utf-8')
             return self.answer(404, dict(error='Não encontrado.'))
         name, kind = files[self.path]
         self.answer(200, (ASSETS / name).read_bytes(), kind)
@@ -830,7 +870,19 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/api/view':
                 result = v.view(data)
             elif self.path == '/api/tasks':
+                old={t['id']:t for t in v.tasks()['tasks']}
+                if any(t['id'] not in old for t in data.get('tasks',[])):
+                    raise Problem('Novas tarefas precisam do planejamento com critérios.')
                 result = v.tasks(data)
+            elif self.path == '/api/task-plan':
+                from project_workflow import ProjectWorkflow
+                result=ProjectWorkflow(v).upsert(data['task'],data['revision'],data.get('criteria'),data.get('resources'),data.get('kind','execution'))
+            elif self.path == '/api/project-state':
+                from project_workflow import ProjectWorkflow
+                result=ProjectWorkflow(v).save_state(data['state'],data['revision'])
+            elif self.path == '/api/task-evidence':
+                from project_workflow import ProjectWorkflow
+                result=ProjectWorkflow(v).evidence(data['task_id'],'',data['criterion_id'],data['artifact'],data['sha256'],data.get('report'),data.get('report_sha256'),data.get('passed',True),owner=True)
             elif self.path == '/api/activities':
                 result = v.activities(payload=data)
             elif self.path == '/api/organization':
@@ -845,7 +897,35 @@ class Handler(BaseHTTPRequestHandler):
                 result = v.export_full()
             elif self.path == '/api/import':
                 result = v.import_backup(data['data'], data.get('commit') is True)
-            elif self.path == '/api/folder':
+            elif self.path == '/api/backup-run':
+                result = self.server.backups.start(data.get('remote', False))
+            elif self.path == '/api/backup-automatic':
+                result = self.server.backups.automatic.configure(data.get('enabled'))
+            elif self.path in {'/api/drive-connect', '/api/drive-cancel', '/api/drive-disconnect', '/api/drive-config'}:
+                if self.server.backups.busy:
+                    raise BackupError('Aguarde o backup terminar antes de alterar a conexão.')
+                drive = self.server.backups.drive
+                if self.path == '/api/drive-connect':
+                    drive.begin()
+                    result = drive.state()
+                elif self.path == '/api/drive-cancel':
+                    result = drive.cancel()
+                elif self.path == '/api/drive-disconnect':
+                    result = drive.disconnect()
+                else:
+                    with tempfile.TemporaryDirectory(prefix='bora-oauth-dialog-') as temporary:
+                        resultfile = str(Path(temporary) / 'oauth.txt')
+                        command = [sys.executable]
+                        if not getattr(sys, 'frozen', False): command.append(str(Path(__file__).resolve()))
+                        command += ['--oauth-file-dialog', resultfile]
+                        subprocess.run(command, check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                        selected = Path(resultfile).read_text('utf-8')
+                    result = drive.configure(json.loads(Path(selected).read_text('utf-8'))) if selected else drive.state()
+            elif self.path in {'/api/folder', '/api/backup-destination'}:
+                if self.server.backups.busy:
+                    raise BackupError('Aguarde o backup terminar.')
+                if self.path == '/api/backup-destination' and data.get('kind') != 'local':
+                    raise BackupError('Destino inválido.')
                 # Dialog is in a separate main-thread process, never a browser-supplied path.
                 with tempfile.TemporaryDirectory(prefix='bora-dialog-') as temporary:
                     resultfile = str(Path(temporary) / 'folder.txt')
@@ -855,17 +935,25 @@ class Handler(BaseHTTPRequestHandler):
                     command += ['--folder-dialog', resultfile]
                     subprocess.run(command, check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                     selected = Path(resultfile).read_text('utf-8')
-                if selected:
-                    self.server.vault = Vault(selected)
-                result = self.server.vault.state()
+                if self.path == '/api/backup-destination':
+                    result = self.server.backups.configure(data['kind'], selected) if selected else self.server.backups.state()
+                else:
+                    if selected:
+                        self.server.backups.automatic.stop()
+                        self.server.vault = Vault(selected)
+                        self.server.backups = BackupService(self.server.vault)
+                        self.server.backups.automatic.start()
+                    result = self.server.vault.state()
             elif self.path == '/api/quit':
+                if self.server.backups.busy:
+                    raise BackupError('Aguarde o backup terminar antes de sair.')
                 result = dict(ok=True)
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             else:
                 raise Problem('Operação desconhecida.', 404)
             self.answer(200, result)
         except (Problem, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as e:
-            message = str(e) if isinstance(e, Problem) else 'Operação não concluída. Confira a pasta, permissões e formato do arquivo.'
+            message = str(e) if isinstance(e, (Problem, BackupError, DriveError)) else 'Operação não concluída. Confira a pasta, permissões e formato do arquivo.'
             self.answer(getattr(e, 'status', 400), dict(error=message))
 
 
@@ -874,6 +962,8 @@ def create_server(folder, port=0):
     server.host = f'127.0.0.1:{server.server_port}'
     server.token = secrets.token_urlsafe(32)
     server.vault = Vault(folder)
+    server.backups = BackupService(server.vault)
+    server.backups.automatic.start()
     return server
 
 
@@ -884,7 +974,11 @@ def main():
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--ready-file')
     parser.add_argument('--folder-dialog')
+    parser.add_argument('--oauth-file-dialog')
     args = parser.parse_args()
+    if args.oauth_file_dialog:
+        Path(args.oauth_file_dialog).write_text(choose_oauth_file(), encoding='utf-8')
+        return
     if args.folder_dialog:
         Path(args.folder_dialog).write_text(choose_folder(), encoding='utf-8')
         return
@@ -900,9 +994,11 @@ def main():
     try:
         server.serve_forever()
     finally:
+        server.backups.automatic.stop()
         server.server_close()
 
 
 if __name__ == '__main__':
     main()
+
 

@@ -21,6 +21,12 @@ class OrganizationTest(unittest.TestCase):
         for folder in ['../fora','Comunidade//Curso','C:\\segredo',' /pasta','/'.join(['a']*9)]:
             with self.assertRaises(Problem):self.save([folder],{})
 
+    def test_guidance_classification_preserves_content_and_links(self):
+        raw=self.v.path(self.note['id']).read_bytes()
+        result=self.save([],{self.note['id']:dict(folder='',category='guidance',priority=False)})
+        self.assertEqual(Vault(self.tmp.name).organization()['notes'],result['notes'])
+        self.assertEqual(self.v.path(self.note['id']).read_bytes(),raw)
+
     def test_unknown_folder_or_unsafe_note_rejected(self):
         with self.assertRaises(Problem):self.save([],{self.note['id']:dict(folder='Inexistente')})
         with self.assertRaises(Problem):self.save([],{'../segredo.md':{}})

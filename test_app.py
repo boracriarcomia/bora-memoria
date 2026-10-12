@@ -161,6 +161,24 @@ class HTTPTest(unittest.TestCase):
         note = json.load(urllib.request.urlopen(req))
         self.assertEqual(Vault(self.tmp.name).note(note['id'])['body'], 'Contexto')
 
+    def test_current_context_and_governed_plan_are_authenticated(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(self.base+'/api/project-state')
+        self.assertEqual(error.exception.code,403)
+        headers={'X-Bora-Token':self.server.token,'Origin':self.base}
+        context=json.load(urllib.request.urlopen(urllib.request.Request(self.base+'/api/project-state',headers=headers)))
+        self.assertFalse(context['configured'])
+        payload={'task':{'id':'new','title':'Nova execução','acceptance':'Testar resultado'},'revision':self.server.vault.tasks()['revision'],'resources':['web'],'kind':'execution'}
+        result=json.load(urllib.request.urlopen(urllib.request.Request(self.base+'/api/task-plan',data=json.dumps(payload).encode(),headers=headers)))
+        self.assertEqual(result['tasks'][0]['id'],'new')
+        tasks=json.load(urllib.request.urlopen(urllib.request.Request(self.base+'/api/tasks',headers=headers)))
+        self.assertEqual(tasks['governance']['new']['kind'],'execution')
+        tasks['tasks'][0]['state']='done'
+        tasks['tasks'][0]['evidence']='Resultado alegado sem critérios verificados'
+        with self.assertRaises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(urllib.request.Request(self.base+'/api/tasks',data=json.dumps(tasks).encode(),headers=headers))
+        self.assertEqual(rejected.exception.code,409)
+
 
 if __name__ == '__main__':
     unittest.main()

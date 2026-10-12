@@ -6,6 +6,15 @@ from app import Vault, Problem
 
 
 class WorkspaceTest(unittest.TestCase):
+    def test_theme_survives_other_view_updates_and_rejects_invalid_value(self):
+        with tempfile.TemporaryDirectory() as folder:
+            v=Vault(folder)
+            v.view(dict(theme='dark',stage='Inicial',positions={}))
+            v.view(dict(stage='Revisão',positions={}))
+            self.assertEqual(Vault(folder).view()['theme'],'dark')
+            with self.assertRaises(Problem):v.view(dict(theme='invalid',positions={}))
+            self.assertEqual(Vault(folder).view()['stage'],'Revisão')
+
     def test_layout_and_stage_survive_reopen_and_backup_restore(self):
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             v=Vault(a);n=v.save(dict(title='Etapa',body='[[Outra]]'))

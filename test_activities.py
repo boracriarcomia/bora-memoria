@@ -34,7 +34,7 @@ class ActivityTest(unittest.TestCase):
         initial=self.v.tasks();t=dict(id='one',title='Tarefa',state='pending',depends=[],evidence='')
         self.v.tasks(dict(revision=initial['revision'],tasks=[t]))
         self.assertEqual(self.v.activities()['events'][-1]['source'],'app')
-        p=Path(self.tmp.name,'.bora/config/tasks.json');data=json.loads(p.read_text('utf-8'));data['tasks'][0]['state']='doing';p.write_text(json.dumps(data),encoding='utf-8')
+        data=self.v.tasks();data['tasks'][0]['state']='doing';self.v.task_store().tasks(dict(revision=data['revision'],tasks=data['tasks']))
         self.assertEqual(self.v.activities()['events'][-1]['source'],'external')
 
     def test_backup_preserves_activity_observation(self):
