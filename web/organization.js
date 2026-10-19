@@ -3,6 +3,7 @@ let organizationData={folders:[],notes:{},revision:''},activeFolder='',priorityO
 const expandedFolders=new Set();
 async function openGraphFolder(item){
   if(!await mayLeave())return;
+  api('consultation',{folder:item.path}).catch(()=>{});
   await revealGraphItem(item);
   const box=modal(item.title,['Arquivos e subpastas desta pasta.']);
   const knownFolders=new Set(organizationData.folders);
@@ -26,6 +27,7 @@ async function revealGraphItem(item){
 const categoryStyle={guidance:['Orientações','#187e65'],general:['Geral','#8b70b8'],community:['Comunidade','#6d28d9'],continuity:['Continuidade','#475569'],youtube:['YouTube','#c93845'],instagram:['Instagram','#b73591'],brand:['Marca','#bd5b32'],content:['Conteúdo','#187e65'],projects:['Projetos','#286da5']};
 function classification(n){return organizationData.notes[n.id]||{folder:n.id.includes('/')?n.id.slice(0,n.id.lastIndexOf('/')):'',category:'general',priority:false};}
 function drawNoteTree(){
+  syncContentColors();
   const q=$('search').value.toLocaleLowerCase(),out=$('notes');out.replaceChildren();
   const matches=notes.filter(n=>(n.title+' '+n.body).toLocaleLowerCase().includes(q)&&(!priorityOnly||classification(n).priority));
   $('count').textContent=matches.length;$('mapLabels').value=organizationData.labels||'all';
@@ -53,8 +55,9 @@ $('collapseFolders').onclick=()=>{expandedFolders.clear();drawNoteTree();};
 async function saveOrganization(next){organizationData=await api('organization',{...next,revision:organizationData.revision});drawNoteTree();renderGraph();}
 function newFolder(){
   const c=modal('Nova pasta',[]),label=element('label','Nome da pasta'),input=element('input');input.id='newFolderName';label.htmlFor=input.id;input.maxLength=240;input.placeholder='Comunidade/Cursos';input.value=activeFolder?activeFolder+'/':'';
+  const color=element('input');color.type='color';color.id='newFolderColor';color.value='#f6c453';const colorLabel=element('label','Cor da pasta');colorLabel.htmlFor=color.id;
   const error=element('p');error.setAttribute('role','alert');const b=element('button','Criar pasta','primary');
-  b.onclick=async()=>{b.disabled=true;try{const name=input.value.trim();if(!name)throw Error('Informe o nome da pasta.');await saveOrganization({...organizationData,folders:[...new Set([...organizationData.folders,name])]});activeFolder=name;name.split('/').forEach((_,i)=>expandedFolders.add(name.split('/').slice(0,i+1).join('/')));drawNoteTree();$('dialog').close();}catch(e){error.textContent=e.message;}finally{b.disabled=false;}};c.append(label,input,error,b);
+  b.onclick=async()=>{b.disabled=true;try{const name=input.value.trim();if(!name)throw Error('Informe o nome da pasta.');await saveOrganization({...organizationData,folders:[...new Set([...organizationData.folders,name])],colors:{...organizationData.colors,[name]:color.value}});activeFolder=name;name.split('/').forEach((_,i)=>expandedFolders.add(name.split('/').slice(0,i+1).join('/')));drawNoteTree();$('dialog').close();}catch(e){error.textContent=e.message;}finally{b.disabled=false;}};c.append(label,input,colorLabel,color,element('p','Pastas centrais aparecem como grupos no mapa. Subpastas herdam a cor.'),error,b);
 }
 $('newFolder').onclick=newFolder;
 function organizeNote(){
@@ -70,7 +73,7 @@ function organizeNote(){
 }
 $('organizeNote').onclick=organizeNote;
 const beforeOrganizationGraph=renderGraph;
-renderGraph=function(){beforeOrganizationGraph();for(const node of $('map').querySelectorAll('[data-note]')){const info=organizationData.notes[node.dataset.note]||{category:'general',priority:false};node.querySelector('circle').setAttribute('fill',folderColor(info.folder||node.dataset.note.split('/').slice(0,-1).join('/'),neuralColor(info.folder||node.dataset.note.split('/').slice(0,-1).join('/')||node.dataset.visualGroup||'Geral')));if(info.priority){node.querySelector('circle').setAttribute('stroke','#e0a923');node.querySelector('circle').setAttribute('stroke-width','1.2');}const title=svg('title',{});title.textContent=node.getAttribute('aria-label')+' · '+categoryStyle[info.category][0]+(info.priority?' · Prioridade':'');}};
+renderGraph=function(){beforeOrganizationGraph();for(const node of $('map').querySelectorAll('[data-note]')){const info=organizationData.notes[node.dataset.note]||{category:'general',priority:false};if(!node.dataset.category)node.querySelector('circle').setAttribute('fill',folderColor(info.folder||node.dataset.note.split('/').slice(0,-1).join('/'),neuralColor(info.folder||node.dataset.note.split('/').slice(0,-1).join('/')||node.dataset.visualGroup||'Geral')));if(info.priority){node.querySelector('circle').setAttribute('stroke','#e0a923');node.querySelector('circle').setAttribute('stroke-width','1.2');}const title=svg('title',{});title.textContent=node.getAttribute('aria-label')+' · '+categoryStyle[info.category][0]+(info.priority?' · Prioridade':'');}};
 const beforeOrganizationSave=save;
 save=async function(){const creating=!current,folder=activeFolder;await beforeOrganizationSave();if(creating&&current&&!dirty&&folder&&!organizationData.notes[current.id]){try{await saveOrganization({...organizationData,notes:{...organizationData.notes,[current.id]:{folder,category:'general',priority:false}}});}catch(e){notice('Nota salva; organização pendente: '+e.message);}}};
 $('save').onclick=save;
@@ -95,7 +98,18 @@ const folderOperation=$('folder').onclick;
 $('folder').onclick=async()=>{await folderOperation();activeFolder='';expandedFolders.clear();await reloadOrganization();};
 reloadOrganization().catch(e=>notice('Organização não carregada: '+e.message));
 
-function folderColor(folder,fallback){let path=folder;const colors=organizationData.colors||{};while(path){if(colors[path])return colors[path];path=path.split('/').slice(0,-1).join('/');}return colors['*']||fallback;}
+const contentRootColors=new Map();
+let contentColorSignature='';
+function syncContentColors(){
+ const roots=[...new Set([...notes.filter(n=>n.id.includes('/')).map(n=>n.id.split('/')[0]),...organizationData.folders.map(p=>p.split('/')[0])])].sort();
+ const signature=JSON.stringify(roots);if(signature===contentColorSignature)return;
+ contentColorSignature=signature;contentRootColors.clear();const hues=[];
+ for(const root of roots){let hash=0;for(const c of root)hash=(hash*31+c.charCodeAt(0))>>>0;let hue=hash%360;
+  for(let tries=0;tries<360&&hues.some(h=>Math.min(Math.abs(h-hue),360-Math.abs(h-hue))<10);tries++)hue=(hue+137)%360;
+  hues.push(hue);contentRootColors.set(root,'hsl('+hue+' 65% 60%)');
+ }
+}
+function folderColor(folder,fallback){let path=folder;const colors=organizationData.colors||{};while(path){if(colors[path])return colors[path];path=path.split('/').slice(0,-1).join('/');}return colors['*']||contentRootColors.get(folder.split('/')[0])||fallback;}
 $('folderColors').onclick=()=>{
  const c=modal('Cores das pastas',[]),select=element('select');select.id='colorFolder';
  const label=element('label','Pasta');label.htmlFor=select.id;
@@ -109,7 +123,7 @@ $('folderColors').onclick=()=>{
  c.append(label,select,cl,color,element('p','Subpastas herdam a cor da pasta. Uma cor própria tem prioridade.'),error,saveColor,reset);
 };
 
-const beforeFolderColorsGraph=renderGraph;renderGraph=function(){beforeFolderColorsGraph();for(const node of $('map').querySelectorAll('[data-folder]'))node.querySelector('circle').setAttribute('fill',folderColor(node.dataset.folder,neuralColor(node.dataset.folder)));};
+const beforeFolderColorsGraph=renderGraph;renderGraph=function(){beforeFolderColorsGraph();for(const node of $('map').querySelectorAll('[data-folder]'))if(!node.dataset.category)node.querySelector('circle').setAttribute('fill',folderColor(node.dataset.folder,neuralColor(node.dataset.folder)));};
 
 function neuralColor(path){const root=path.split('/')[0]||'Geral',palette=['#52c9ee','#b89aff','#efac63','#df7ee8','#7bb6ff','#f0809a','#72d9bc'];let hash=0;for(const c of root)hash=(hash*31+c.charCodeAt(0))>>>0;return palette[hash%palette.length];}
 

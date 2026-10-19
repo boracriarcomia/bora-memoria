@@ -72,7 +72,25 @@ function renderReading(){
   }
 }
 function showReading(reading){$('title').hidden=reading;document.querySelector('label[for="title"]').hidden=reading;document.querySelector('label[for="body"]').hidden=reading;document.querySelector('.edit-actions').hidden=reading;document.querySelector('.editor-bottom').hidden=reading;$('body').hidden=reading;$('reading').hidden=!reading;$('readMode').setAttribute('aria-pressed',String(reading));$('readMode').textContent=reading?'Editar':'Ler';if(reading)renderReading();}
-$('readMode').onclick=()=>showReading($('reading').hidden);
+const noteEditorDialog=element('dialog',undefined,'note-editor-dialog');
+noteEditorDialog.setAttribute('aria-label','Editor ampliado de nota');
+const noteEditorClose=element('button','Fechar editor','note-editor-close');
+noteEditorClose.type='button';noteEditorClose.onclick=()=>noteEditorDialog.close();
+noteEditorDialog.append(noteEditorClose);document.body.append(noteEditorDialog);
+let noteEditorHome=null;
+function openNoteEditor(){
+  if(noteEditorDialog.open)return;
+  showReading(false);
+  const panel=$('notePanel');noteEditorHome=document.createComment('Local do editor');
+  panel.before(noteEditorHome);noteEditorDialog.append(panel);panel.hidden=false;
+  noteEditorDialog.showModal();$('body').focus();
+}
+noteEditorDialog.addEventListener('close',()=>{
+  if(noteEditorHome){noteEditorHome.replaceWith($('notePanel'));noteEditorHome=null;}
+  showReading(true);
+  if(dirty)status('Rascunho preservado · alterações sem salvar','dirty');
+});
+$('readMode').onclick=()=>{if(noteEditorDialog.open){showReading($('reading').hidden);}else openNoteEditor();};
 const originalOpen=openNote;openNote=async function(note){await originalOpen(note);if(dirty)return;showReading(!!note);};
 $('context').onclick=()=>{
   if(dirty){notice('Salve a nota antes de preparar o contexto.');return;}

@@ -11,9 +11,10 @@ function updateProgress(){
   $('taskProgress').setAttribute('aria-label',`${done} de ${total} tarefas concluídas`);
 }
 async function loadTasks(){taskData=await api('tasks');updateProgress();}
-async function writeTasks(tasks){taskData=await api('tasks',{revision:taskData.revision,tasks});updateProgress();}
+async function writeTasks(tasks,revision=taskData.revision){taskData=await api('tasks',{revision,tasks});updateProgress();}
 function taskField(c,label,value='',multiline=false){const id='task-'+label.replace(/\W/g,'');const l=element('label',label),input=element(multiline?'textarea':'input');input.id=id;l.htmlFor=id;input.value=value;c.append(l,input);return input;}
 function editTask(task){
+  const editRevision=taskData.revision,editTasks=taskData.tasks.map(t=>({...t,depends:[...t.depends]}));
   const c=modal(task?'Editar tarefa':'Nova tarefa',[]);
   const title=taskField(c,'Título da tarefa',task?.title||''),owner=taskField(c,'Responsável',task?.owner||'');title.maxLength=160;owner.maxLength=120;
   const l=element('label','Estado'),state=element('select');state.id='task-state';l.htmlFor=state.id;
@@ -29,7 +30,7 @@ function editTask(task){
   const noteLabel=element('label','Nota relacionada'),note=element('select');note.id='task-note';noteLabel.htmlFor=note.id;
   const empty=element('option','Nenhuma');empty.value='';note.append(empty);
   for(const n of notes){const o=element('option',n.title);o.value=n.id;note.append(o);}note.value=task?.note||'';c.append(noteLabel,note);
-  c.append(element('label','Depende de'));
+  c.append(element('h3','Depende de outras tarefas'),element('p','Marque somente as tarefas necessárias antes desta. Estas caixas não indicam conclusão.'));
   const checks=[];
   for(const t of taskData.tasks.filter(t=>t.id!==task?.id)){const label=element('label'),box=element('input');box.type='checkbox';box.checked=task?.depends?.includes(t.id)||false;label.append(box,document.createTextNode(' '+t.title));c.append(label);checks.push([t.id,box]);}
   const error=element('p');error.setAttribute('role','alert');const saveButton=element('button','Salvar tarefa','primary');
@@ -37,10 +38,10 @@ function editTask(task){
     if(state.value==='blocked'&&!evidence.value.trim())throw Error('Informe o motivo do bloqueio pelo proprietário no campo de evidência.');
     if(task?.state==='blocked'&&state.value!=='blocked'&&!confirm('Desbloquear esta tarefa? A retomada está autorizada pelo proprietário.'))return;
     const changed={id:task?.id||'t_'+crypto.randomUUID().replaceAll('-',''),title:title.value,owner:owner.value,state:state.value,evidence:evidence.value,note:note.value,priority:priority.value,acceptance:acceptance.value,depends:checks.filter(([,box])=>box.checked).map(([id])=>id)};
-    const next=task?taskData.tasks.map(t=>t.id===task.id?changed:t):[...taskData.tasks,changed];
+    const next=task?editTasks.map(t=>t.id===task.id?changed:t):[...editTasks,changed];
     const needsPlan=!task||contract?.kind==='legacy'||task.acceptance!==changed.acceptance||contract?.kind!==kind.value||JSON.stringify(contract?.resources||[])!==JSON.stringify(resources.value.split('\n').map(x=>x.trim()).filter(Boolean));
-    if(needsPlan){if(changed.state!=='pending')throw Error('Ao definir critérios, deixe a tarefa A fazer; registre evidências antes de concluir.');await api('task-plan',{task:changed,revision:taskData.revision,kind:kind.value,resources:resources.value.split('\n').map(x=>x.trim()).filter(Boolean)});await loadTasks();}
-    else await writeTasks(next);showTasks();
+    if(needsPlan){if(changed.state!=='pending')throw Error('Ao definir critérios, deixe a tarefa A fazer; registre evidências antes de concluir.');await api('task-plan',{task:changed,revision:editRevision,kind:kind.value,resources:resources.value.split('\n').map(x=>x.trim()).filter(Boolean)});await loadTasks();}
+    else await writeTasks(next,editRevision);await refreshActivities();showTasks();
   }catch(e){error.textContent=e.message;}finally{saveButton.disabled=false;}};c.append(error,saveButton);
 }
 function showTasks(){

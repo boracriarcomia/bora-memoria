@@ -2,11 +2,12 @@
 let activityData={events:[],revision:''},activityFilter='all',activityBusy=false;
 const activityLabels={note_imported:'Nota importada do Obsidian',note_saved:'Nota salva',note_removed:'Nota movida para lixeira',note_restored:'Nota restaurada',external_created:'Nota externa adicionada',external_changed:'Alteração externa',external_removed:'Nota removida externamente',task_changed:'Tarefa atualizada'};
 function selectPanel(name){
-  for(const panel of ['activity','note','guidance']){
+  for(const panel of ['activity','note','guidance','insights']){
     $(panel+'Panel').hidden=panel!==name;
     $(panel+'Tab').setAttribute('aria-selected',String(panel===name));
   }
   if(name==='guidance')renderGuidance();
+  if(name==='insights'&&typeof refreshInsights==='function')refreshInsights(true);
 }
 function renderGuidance(){
   const out=$('guidanceList');out.replaceChildren();
@@ -20,7 +21,7 @@ $('guidanceTab').onclick=()=>selectPanel('guidance');
 $('guidanceState').onclick=()=>$('projectState').click();
 $('activityTab').onclick=()=>{selectPanel('activity');refreshActivities();};
 $('noteTab').onclick=()=>selectPanel('note');
-const panelTabs=['activityTab','noteTab','guidanceTab'];
+const panelTabs=['activityTab','noteTab','guidanceTab','insightsTab'];
 for(const id of panelTabs)$(id).addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();const step=e.key==='ArrowRight'?1:-1,target=panelTabs[(panelTabs.indexOf(id)+step+panelTabs.length)%panelTabs.length];$(target).focus();$(target).click();}});
 const openFromActivity=openNote;
 openNote=async function(n){await openFromActivity(n);if(n===null||current?.id===n.id)selectPanel('note');};
@@ -45,12 +46,11 @@ function renderActivities(){
   const monitoredTasks=new Set((taskData.execution||[]).map(run=>run.task));
   let previousGroup='';
   for(const t of sorted){
-    if(monitoredTasks.has(t.id))continue;
     const group=({done:'Concluídas',cancelled:'Canceladas · histórico',superseded:'Substituídas · histórico'}[t.state]||'Prioridade '+priorityLabels[t.priority||'normal']);
     if(group!==previousGroup){taskArea.append(element('h3',group,'activity-priority-heading'));previousGroup=group;}
     const b=element('button',undefined,'activity-task'+(t.state==='done'?' completed':'')+(t.state==='cancelled'?' cancelled':'')+(t.state==='superseded'?' superseded':''));
     b.append(element('strong',t.title));
-    const badges=element('div',undefined,'task-meta');badges.append(element('span',terminalRank(t)?taskStateLabel(t):taskBlocked(t)?'Aguardando dependência':taskStateLabel(t),'activity-tag'));if(!['cancelled','superseded'].includes(t.state))badges.append(element('span',priorityLabels[t.priority||'normal'],'activity-tag'));b.append(badges);
+    const badges=element('div',undefined,'task-meta');badges.append(element('span',terminalRank(t)?taskStateLabel(t):monitoredTasks.has(t.id)?'Em execução':taskBlocked(t)?'Aguardando dependência':taskStateLabel(t),'activity-tag'));if(!['cancelled','superseded'].includes(t.state))badges.append(element('span',priorityLabels[t.priority||'normal'],'activity-tag'));b.append(badges);
     const last=[...(taskData.history||[])].reverse().find(h=>h.task===t.id);if(last)b.append(element('small',new Date(last.at).toLocaleString('pt-BR')));if(t.owner)b.append(element('small','Responsável: '+t.owner));if(t.evidence)b.append(element('span',t.evidence,'task-evidence'));b.onclick=()=>editTask(t);taskArea.append(b);
   }
   if(!sorted.length)taskArea.append(element('p','Nenhuma tarefa cadastrada.'));
@@ -72,21 +72,29 @@ function renderActivities(){
 }
 async function refreshActivities(){
   if(activityBusy)return;activityBusy=true;
-  try{await loadTasks();activityData=await api('activities');renderActivities();$('activityUpdate').textContent='Atualizado '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}
+  try{await loadTasks();activityData=await api('activities');renderActivities();if(typeof refreshInsights==='function'&&!$('insightsPanel').hidden)refreshInsights();$('activityUpdate').textContent='Atualizado '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}
   catch(e){$('activityUpdate').textContent='Falha ao atualizar';notice(e.message);}finally{activityBusy=false;}
 }
 $('activityFilter').onchange=()=>{activityFilter=$('activityFilter').value;renderActivities();};
 $('refreshActivity').onclick=refreshActivities;
 $('allTasks').onclick=async()=>{try{await loadTasks();showTasks();}catch(e){notice(e.message);}};
+const newActivityButton=element('button','+ Nova atividade','primary');
+newActivityButton.id='newActivity';
+newActivityButton.onclick=async()=>{try{await loadTasks();editTask(null);}catch(e){notice(e.message);}};
+$('allTasks').before(newActivityButton);
 const originalWriteTasks=writeTasks;
-writeTasks=async function(tasks){await originalWriteTasks(tasks);await refreshActivities();};
+writeTasks=async function(tasks,revision){await originalWriteTasks(tasks,revision);await refreshActivities();};
 const activityTimer=setInterval(()=>{if(!window.boraBackground&&!document.hidden)refreshActivities();},4000);
+document.addEventListener('visibilitychange',()=>{if(!window.boraBackground&&!document.hidden)refreshActivities();});
+window.addEventListener('focus',()=>{if(!window.boraBackground&&!document.hidden)refreshActivities();});
 selectPanel('activity');refreshActivities();
 
 function renderAIConsole(){
   const out=$('aiConsoleLines');out.replaceChildren();
   const runs=taskData.execution||[],lines=[];
-  $('aiConsoleState').textContent=runs.length?runs.length+' em execução':'Sem execução';
+  for(const run of window.boraConsultationRuns||[])lines.push({state:run.active?'CONSULTANDO':'CONSULTOU',agent:run.agent,text:[...run.notes,...(run.folders||[])].join(', '),active:run.active});
+  const activeCount=runs.length+(window.boraConsultationRuns||[]).filter(r=>r.active).length;
+  $('aiConsoleState').textContent=activeCount?activeCount+' em execução':'Sem execução';
 
   for(const run of runs){
     const task=taskData.tasks.find(t=>t.id===run.task);if(!task)continue;
@@ -101,6 +109,8 @@ function renderAIConsole(){
     if(event.kind==='guidance_consulted'&&lines.some(l=>l.note===event.note&&l.agent===event.agent))continue;
     lines.push({state:event.kind==='action_started'?(event.operation==='read'?'CONSULTANDO':'ALTERANDO'):labels[event.kind],agent:event.agent,text:event.title+(event.kind==='action_failed'?' · operação não concluída':''),at:event.at,active:event.kind==='action_started'});
   }
+  const latest=lines[0];
+  $('aiConsoleLatest').textContent=latest ? (lines.some(l=>l.active)?'Agora: ':'Última ação: ')+latest.agent+' · '+latest.text : 'Aguardando ações registradas.';
   for(const line of lines.slice(0,20)){
     const row=element('div',undefined,'console-line'+(line.active?' console-active':''));row.setAttribute('role','listitem');
     const state=element('span','['+line.state+']','console-state');
@@ -116,3 +126,4 @@ function renderAIConsole(){
   }
   if(!out.children.length)out.append(element('p','Aguardando ações registradas.'));
 }
+
