@@ -8,6 +8,14 @@
 
 Bora Memória é um aplicativo gratuito para reunir notas, referências, decisões e tarefas em um cofre local. O mapa de conexões ajuda a navegar pelo conhecimento, enquanto a integração MCP permite que clientes de IA compatíveis consultem o contexto e acompanhem o trabalho autorizado.
 
+## Novidades — 0.4.1
+
+Mapa organizado em grupos conectados, cores por conjunto e espaçamento entre núcleos. Os controles compactos seguem o padrão da barra: **Modo leve** pausa o mapa parado; **Modo Live** mantém animações; **Expandir** amplia o mapa para gravação e **Esc** restaura o painel e o modo anterior. As imagens abaixo foram capturadas no aplicativo Windows instalado, com títulos de notas e painéis de tarefas ocultos.
+
+![Mapa com controles compactos](docs/imagens/mapa-modo-leve.png)
+
+![Mapa expandido para gravação](docs/imagens/mapa-expandido.png)
+
 ## O que você pode fazer
 
 - Organizar notas Markdown, imagens e anexos em pastas reais.

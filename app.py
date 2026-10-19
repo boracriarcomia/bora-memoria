@@ -1,4 +1,4 @@
-"""Bora Notas: local Markdown files, loopback UI, no external services."""
+"""Bora Memória: local vault and optional explicitly connected AI services."""
 from backup_service import BackupService, BackupError
 from drive_api import DriveError, credentials_root
 import argparse
@@ -33,6 +33,46 @@ class Problem(Exception):
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
+
+
+RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL', *[f'COM{i}' for i in range(1, 10)], *[f'LPT{i}' for i in range(1, 10)]}
+# Characters Windows forbids in file names plus Obsidian link syntax ([[ ]], #, ^, |).
+UNSAFE_NAME_CHARS = '\\/:*?"<>|#^[]'
+
+
+def safe_stem(title):
+    """File name for a NEW note: keeps accents, dashes (— –), commas and parentheses.
+
+    Only characters that Windows or wiki links cannot hold are replaced. "/" and ":"
+    become " - " so words never merge (old bug: "Chegou LeadClientes...")."""
+    text = unicodedata.normalize('NFC', title)
+    text = ''.join(' - ' if c in '/\\:' else (' ' if c in UNSAFE_NAME_CHARS or ord(c) < 32 else c) for c in text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'(?:\s-\s)+(?:-\s)*', ' - ', text)  # collapse repeated separators
+    text = text.strip(' .-')[:80].rstrip(' .-')
+    if not text:
+        text = 'Nota'
+    if text.upper() in RESERVED_NAMES:
+        text = 'Nota ' + text
+    return text
+
+
+def legacy_stem(title):
+    """Name produced by versions up to 0.4.0 (removed "/", "—", ":" etc.). Used only to
+    find notes created before this correction; never to create new names."""
+    stem = re.sub(r'[^\w -]', '', unicodedata.normalize('NFC', title)).strip(' .')[:80] or 'Nota'
+    if stem.upper() in RESERVED_NAMES:
+        stem = 'Nota ' + stem
+    return stem
+
+
+def split_title_path(title):
+    """"Pasta/Sub/Título" -> ("Pasta/Sub", "Título"). Each folder part is cleaned with safe_stem."""
+    parts = [p.strip() for p in title.split('/')]
+    if len(parts) < 2 or not parts[-1]:
+        return '', title.strip()
+    folders = [safe_stem(p) for p in parts[:-1] if p]
+    return '/'.join(folders), parts[-1]
 
 
 def digest(data):
@@ -176,9 +216,7 @@ class Vault:
             else:
                 if len(self.note_files()) >= MAX_NOTES:
                     raise Problem('Limite de 500 notas nesta versão.')
-                stem = re.sub(r'[^\w -]', '', unicodedata.normalize('NFC', title)).strip(' .')[:80] or 'Nota'
-                if stem.upper() in {'CON', 'PRN', 'AUX', 'NUL', *[f'COM{i}' for i in range(1, 10)], *[f'LPT{i}' for i in range(1, 10)]}:
-                    stem = 'Nota ' + stem
+                stem = safe_stem(title)
                 folder = payload.get('folder', '')
                 self.folder_path(folder, create=True)
                 prefix = folder + '/' if folder else ''
@@ -187,6 +225,13 @@ class Vault:
                 while (self.root / name).exists():
                     name = prefix + f'{stem} ({n}).md'
                     n += 1
+                requested = payload.get('create_name')
+                if requested:
+                    self.path(requested)  # Validate before creating parent folders.
+                    self.folder_path('/'.join(requested.split('/')[:-1]), create=True)
+                    if (self.root / requested).exists():
+                        raise Problem('Nota já existe. Leia a revisão antes de editar.', 409)
+                    name = requested
                 p = self.path(name)
             if payload.get('id'):
                 atomic(p, data)
@@ -215,7 +260,41 @@ class Vault:
 
     def keep_previous(self, name, raw):
         key = digest(name.encode())[:16]
-        atomic(self.private_dir('anteriores') / (key + '.md'), raw)
+        folder = self.private_dir('anteriores')
+        # Latest previous version (historical location, kept for compatibility).
+        atomic(folder / (key + '.md'), raw)
+        # Every previous version also gets its own file, so repeated updates never
+        # lose intermediate content. Nothing here is ever pruned automatically.
+        history = folder / 'historico'
+        if history.is_symlink() or (history.exists() and not history.is_dir()):
+            raise Problem('Pasta auxiliar insegura; operação cancelada.')
+        history.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        atomic(history / f'{key}-{stamp}-{digest(raw)[:8]}.md', raw)
+        index = history / 'indice.jsonl'
+        with index.open('a', encoding='utf-8') as f:
+            f.write(json.dumps(dict(note=name, file=f'{key}-{stamp}-{digest(raw)[:8]}.md', revision=digest(raw), at=stamp), ensure_ascii=False) + '\n')
+
+    def find_by_title(self, title, folder=''):
+        """Existing note for a title: current naming first, then the 0.4.0 naming.
+
+        Returns the relative name or None. Never creates or renames anything."""
+        prefix = folder + '/' if folder else ''
+        candidates = []
+        for stem in (safe_stem(title), legacy_stem(title), title.strip()):
+            name = prefix + stem + '.md'
+            if name not in candidates:
+                candidates.append(name)
+        for name in candidates:
+            try:
+                p = self.path(name)
+            except Problem:
+                continue
+            if p.is_file():
+                # Windows ignores case: return the real spelling so an update never renames.
+                actual = next((e for e in os.listdir(p.parent) if e.casefold() == p.name.casefold()), p.name)
+                return prefix + actual
+        return None
 
     def view(self, value=None):
         with self.lock:
@@ -821,10 +900,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self.answer(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
             except (Problem,OSError) as e:
                 return self.answer(getattr(e,'status',400),dict(error=str(e)))
-        if self.path in ['/api/state', '/api/backup', '/api/view', '/api/tasks', '/api/activities', '/api/organization', '/api/backup-state', '/api/project-state']:
+        if self.path in ['/api/state', '/api/backup', '/api/view', '/api/tasks', '/api/activities', '/api/organization', '/api/backup-state', '/api/project-state', '/api/insights', '/api/consultations', '/api/connectors', '/api/telegram', '/api/central-ia', '/api/manager']:
             if not self.authenticated():
                 return self.answer(403, dict(error='Abra pelo aplicativo Bora Notas.'))
             try:
+                if self.path == '/api/manager':
+                    from manager_tools import catalog
+                    return self.answer(200,{**self.server.manager.snapshot(),'catalog':catalog(self.server.vault)})
+                if self.path == '/api/central-ia':
+                    from central_ai import history
+                    from voice import status
+                    from orchestration_owner import memory_only, MESSAGE
+                    return self.answer(200, {**history(self.server.vault), 'voice': status(),
+                                             'memory_only': memory_only(self.server.vault.root),
+                                             'ownership_message': MESSAGE})
+                if self.path == '/api/telegram':
+                    return self.answer(200, self.server.telegram.status())
+                if self.path == '/api/connectors':
+                    from connectors import connectors
+                    return self.answer(200, connectors(self.server.vault))
+                if self.path == '/api/consultations':
+                    from consultations import execution
+                    return self.answer(200, execution(self.server.vault))
+                if self.path == '/api/insights':
+                    from insights import insights
+                    return self.answer(200, insights(self.server.vault))
                 if self.path == '/api/backup-state':
                     return self.answer(200, self.server.backups.state())
                 if self.path == '/api/state':
@@ -848,7 +948,11 @@ class Handler(BaseHTTPRequestHandler):
             except (Problem, OSError, ValueError) as e:
                 return self.answer(getattr(e, 'status', 400), dict(error=str(e)))
         files = {'/logo-light.png': ('logo-light.png', 'image/png'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/graph.js': ('graph.js', 'text/javascript; charset=utf-8'), '/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'), '/tasks.js': ('tasks.js', 'text/javascript; charset=utf-8'), '/activities.js': ('activities.js', 'text/javascript; charset=utf-8'), '/organization.js': ('organization.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/logo.png': ('logo.png', 'image/png')}
-        files.update({'/project-state.js':('project-state.js','text/javascript; charset=utf-8'),'/project-templates.js':('project-templates.js','text/javascript; charset=utf-8')})
+        files['/manager.js'] = ('manager.js', 'text/javascript; charset=utf-8')
+        files['/central-ai.js'] = ('central-ai.js', 'text/javascript; charset=utf-8')
+        files['/central-ai.css'] = ('central-ai.css', 'text/css; charset=utf-8')
+        files.update({'/graph-communities.js':('graph-communities.js','text/javascript; charset=utf-8')})
+        files.update({'/insights.js':('insights.js','text/javascript; charset=utf-8'),'/project-state.js':('project-state.js','text/javascript; charset=utf-8'),'/project-templates.js':('project-templates.js','text/javascript; charset=utf-8'),'/consultations.js':('consultations.js','text/javascript; charset=utf-8'),'/connectors.js':('connectors.js','text/javascript; charset=utf-8')})
         if self.path not in files:
             if self.path == '/project-templates.js':
                 return self.answer(200, (ASSETS / 'project-templates.js').read_bytes(), 'text/javascript; charset=utf-8')
@@ -865,7 +969,46 @@ class Handler(BaseHTTPRequestHandler):
                 raise Problem('Requisição acima do limite.')
             data = json.loads(self.rfile.read(size))
             v = self.server.vault
-            if self.path == '/api/save':
+            if self.path in ('/api/central-ia', '/api/manager', '/api/telegram'):
+                from orchestration_owner import memory_only, MESSAGE
+                if memory_only(v.root):raise Problem(MESSAGE, 409)
+            if self.path == '/api/central-ia':
+                from central_ai import send
+                try:
+                    result = send(v, data, manager=self.server.manager)
+                except ValueError as error:
+                    raise Problem(str(error)) from error
+            elif self.path == '/api/manager':
+                try:
+                    action=data.get('action')
+                    if action=='enable':result=self.server.manager.enable(data.get('enabled'))
+                    elif action=='create':
+                        key=data.get('request_id')
+                        if not isinstance(key,str) or not 1<=len(key)<=100:raise ValueError('Identificador do pedido inválido.')
+                        result={'id':self.server.manager.enqueue(data.get('job'),key)}
+                    elif action=='check_tools':
+                        from manager_tools import check
+                        result=check()
+                    else:result=self.server.manager.control(action,data.get('id'))
+                except ValueError as error:raise Problem(str(error)) from error
+            elif self.path == '/api/telegram':
+                bridge = self.server.telegram
+                action = data.get('action')
+                try:
+                    if action == 'token': result = bridge.set_token(data.get('token'))
+                    elif action == 'code': result = bridge.new_code()
+                    elif action == 'disconnect': result = bridge.disconnect()
+                    else: raise ValueError('Ação desconhecida.')
+                except ValueError as error:
+                    raise Problem(str(error)) from error
+                bridge.start()
+            elif self.path == '/api/central-voice':
+                from voice import transcribe
+                try:
+                    result = transcribe(data)
+                except ValueError as error:
+                    raise Problem(str(error)) from error
+            elif self.path == '/api/save':
                 result = v.save(data)
             elif self.path == '/api/view':
                 result = v.view(data)
@@ -877,6 +1020,9 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/api/task-plan':
                 from project_workflow import ProjectWorkflow
                 result=ProjectWorkflow(v).upsert(data['task'],data['revision'],data.get('criteria'),data.get('resources'),data.get('kind','execution'))
+            elif self.path == '/api/insights':
+                from insights import insights
+                result = insights(v, data)
             elif self.path == '/api/project-state':
                 from project_workflow import ProjectWorkflow
                 result=ProjectWorkflow(v).save_state(data['state'],data['revision'])
@@ -944,6 +1090,13 @@ class Handler(BaseHTTPRequestHandler):
                         self.server.backups = BackupService(self.server.vault)
                         self.server.backups.automatic.start()
                     result = self.server.vault.state()
+            elif self.path == '/api/consultation':
+                from consultations import consultation
+                name = str(data.get('name', ''))
+                folder = str(data.get('folder', ''))
+                if name: self.server.vault.note(name)
+                with consultation(self.server.vault, [name] if name else [], 'Usuário local', [folder] if folder else []):
+                    result = dict(ok=True)
             elif self.path == '/api/quit':
                 if self.server.backups.busy:
                     raise BackupError('Aguarde o backup terminar antes de sair.')
@@ -957,13 +1110,29 @@ class Handler(BaseHTTPRequestHandler):
             self.answer(getattr(e, 'status', 400), dict(error=message))
 
 
-def create_server(folder, port=0):
+def create_server(folder, port=0, telegram=False):
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.host = f'127.0.0.1:{server.server_port}'
     server.token = secrets.token_urlsafe(32)
     server.vault = Vault(folder)
     server.backups = BackupService(server.vault)
     server.backups.automatic.start()
+    from manager import Manager
+    server.manager=Manager(server.vault)
+    from orchestration_owner import memory_only
+    server.memory_only = memory_only(server.vault.root)
+    if not server.memory_only:
+        server.manager.start()
+    from telegram_bridge import Bridge
+    server.telegram=Bridge(lambda: server.vault, manager=server.manager)
+    if telegram and not server.memory_only:
+        server.telegram.start()
+    original_close=server.server_close
+    def close_with_manager():
+        server.telegram.stop()
+        server.manager.stop()
+        original_close()
+    server.server_close=close_with_manager
     return server
 
 
@@ -985,7 +1154,7 @@ def main():
     folder = args.workspace or choose_folder()
     if not folder:
         return
-    server = create_server(folder, args.port)
+    server = create_server(folder, args.port, telegram=True)
     url = f'http://{server.host}/#{server.token}'
     if args.ready_file:
         Path(args.ready_file).write_text(url, encoding='utf-8')

@@ -344,15 +344,21 @@ class ProjectWorkflow:
             pending = {'id': operation_id, 'task': task_id, 'request_hash': request_hash, 'state': 'pending', 'remaining': remaining, 'target_note':name or title+'.md'}
             db.execute('INSERT OR REPLACE INTO operations VALUES (?,?)', (operation_id, encoded(pending).decode()))
         # Deliberately two recoverable steps, not a claimed Markdown/SQLite transaction.
-        note_name = name or title + '.md'
+        from app import safe_stem
+        # Same resolution as save_note: an existing note with this title is updated, never duplicated
+        # as "(2)"; names created by older versions (without "/" or "—") are still found.
+        note_name = name or self.vault.find_by_title(title) or safe_stem(title) + '.md'
         if self.vault.path(note_name).exists():
             existing = self.vault.note(note_name)
             if existing['title'] == title and existing['body'].strip() == body.strip():
                 note = existing
             else:
-                note = self.vault.save({'id': name, 'title': title, 'body': body, 'revision': revision, 'confirm_external': True})
+                if revision is None:
+                    raise self.store.problem(f'A nota "{note_name}" já existe (revisão atual {existing["revision"]}). '
+                                             'Leia a nota e envie revision para atualizar.', 409)
+                note = self.vault.save({'id': note_name, 'title': title, 'body': body, 'revision': revision, 'confirm_external': True})
         else:
-            note = self.vault.save({'id': name, 'title': title, 'body': body, 'revision': revision})
+            note = self.vault.save({'title': title, 'body': body, 'create_name': note_name})
         saved = dict(pending, state='saved', note=note['id'], note_revision=note['revision'], at=datetime.now(timezone.utc).isoformat())
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')

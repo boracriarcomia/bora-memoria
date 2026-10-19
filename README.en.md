@@ -50,3 +50,12 @@ Agent names are declared by the lease holder. The ledger supports accountability
 Released under the [MIT license](LICENSE). Dependencies retain their own licenses; see [third-party notices](THIRD-PARTY-NOTICES.md).
 
 [Website and community](https://boracriarcomia.com.br) · [Instagram](https://www.instagram.com/boracriarcomia/) · [contato@boracriarcomia.com.br](mailto:contato@boracriarcomia.com.br)
+
+## What’s new — 0.4.1
+
+Connected graph groups, category colors and spacing between hubs. Compact icon controls: **Modo leve** pauses idle rendering; **Modo Live** enables continuous animation; **Expandir** expands the map for recording. **Esc** restores the panel and previous mode. Screenshots were captured from the installed Windows application, with note titles and task panels hidden.
+
+![Mapa com controles compactos](docs/imagens/mapa-modo-leve.png)
+
+![Mapa expandido para gravação](docs/imagens/mapa-expandido.png)
+

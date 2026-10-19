@@ -1,12 +1,15 @@
 Unicode true
 !include "MUI2.nsh"
 Name "Bora Memória"
-OutFile "entrega\Bora-Memoria-Instalador-v04.exe"
+OutFile "entrega\Bora-Memoria-Instalador-v041.exe"
 InstallDir "$LOCALAPPDATA\Programs\BoraMemoria"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 !ifndef MCP_BINARY
 !define MCP_BINARY "dist\Bora-Memoria-MCP.exe"
+!endif
+!ifndef MCP_FILENAME
+!define MCP_FILENAME "Bora-Memoria-MCP-v041.exe"
 !endif
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Bem-vindo ao Bora Memória"
@@ -26,12 +29,12 @@ Section "Bora Memória"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
   File /oname=Bora-Memoria.exe "dist\Bora-Memoria-v04.exe"
-  File /oname=LEIA-ME.md "docs\INSTALACAO.md"
-  File "docs\INTEGRACAO-IA.md"
-  File "docs\COFRE-E-PERFIS.md"
-  File "docs\FLUXO-E-CRITERIOS.md"
+  File "LEIA-ME.md"
+  File "INTEGRACAO-IA.md"
+  File "COFRE-E-PERFIS.md"
+  File "FLUXO-E-CRITERIOS.md"
   SetOverwrite ifnewer
-  File /oname=Bora-Memoria-MCP.exe "${MCP_BINARY}"
+  File /oname=${MCP_FILENAME} "${MCP_BINARY}"
   SetOverwrite on
   CreateDirectory "$INSTDIR\Bora-Memoria-backups"
   File "LICENSE"
@@ -49,7 +52,7 @@ Section "Bora Memória"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "DisplayName" "Bora Memória"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "Publisher" "Bora Criar com IA"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "DisplayVersion" "0.4.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "DisplayVersion" "0.4.1"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BoraMemoria" "NoRepair" 1
 SectionEnd
@@ -69,6 +72,7 @@ Section "Uninstall"
   Delete "$INSTDIR\COFRE-E-PERFIS.md"
   Delete "$INSTDIR\FLUXO-E-CRITERIOS.md"
   Delete "$INSTDIR\Bora-Memoria-MCP.exe"
+  Delete "$INSTDIR\${MCP_FILENAME}"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\THIRD-PARTY-NOTICES.md"
   Delete "$INSTDIR\Desinstalar.exe"

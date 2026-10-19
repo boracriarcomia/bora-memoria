@@ -1,0 +1,7 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');const ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/web/graph-communities.js','utf8'),ctx);
+const nodes=[],edges=[];for(const prefix of ['skills','research','history'])for(let i=0;i<8;i++)nodes.push({id:prefix+i,title:prefix+i});
+for(const prefix of ['skills','research','history'])for(let i=0;i<8;i++)for(let j=i+1;j<8;j++)edges.push([prefix+i,prefix+j]);
+edges.push(['skills0','research0']);nodes.push({id:'orphan',title:'Órfã'});
+const original=JSON.stringify(edges),categories=[{id:'skills',title:'Skills',color:'#abc'},{id:'research',title:'Pesquisa',color:'#def'},{id:'history',title:'Histórico',color:'#aaa'}];
+const run=()=>ctx.buildGraphCommunities(nodes,edges,n=>n.id.startsWith('skills')?'skills':n.id.startsWith('research')?'research':'history',categories);
+const t=run();assert.equal(t.membership.get('skills0'),t.membership.get('skills7'));assert.equal(t.membership.get('research0'),t.membership.get('research7'));assert.notEqual(t.membership.get('skills0'),t.membership.get('research0'),'bridge must not collapse dense communities');assert.notEqual(t.membership.get('history0'),t.membership.get('skills0'));assert.equal(t.membership.get('orphan'),'isolated');assert.equal(JSON.stringify(edges),original,'do not invent or rewrite links');assert.equal(JSON.stringify([...t.membership]),JSON.stringify([...run().membership]));assert.equal(new Set(t.membership.keys()).size,nodes.length);console.log('8 community behavior checks passed');

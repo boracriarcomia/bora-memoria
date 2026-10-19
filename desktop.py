@@ -129,7 +129,11 @@ def main():
     parser.add_argument('--no-tray', action='store_true')
     parser.add_argument('--start-hidden', action='store_true', help='Start quietly in the Windows notification area')
     parser.add_argument('--isolated', action='store_true', help='Review without changing saved workspace preferences')
+    parser.add_argument('--review-server', action='store_true', help='Validate the packaged local API without a window')
+    parser.add_argument('--ready-file', help='Private file receiving the local review URL')
     args = parser.parse_args()
+    if args.review_server and not (args.isolated and args.workspace and args.ready_file):
+        parser.error('--review-server exige --isolated, --workspace e --ready-file')
     if args.isolated and not args.workspace:
         parser.error('--isolated exige --workspace')
     if args.oauth_file_dialog:
@@ -138,12 +142,35 @@ def main():
     if args.folder_dialog:
         Path(args.folder_dialog).write_text(choose_folder(), encoding='utf-8')
         return
+    instance = None
+    if sys.platform == 'win32' and not args.review_server:
+        from single_instance import DesktopInstance
+        instance = DesktopInstance()
+        if not instance.primary:
+            return
+    try:
+        run_desktop(args)
+    finally:
+        if instance:
+            instance.close()
+
+
+def run_desktop(args):
     base = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'BoraCriar'
     preference = base / 'desktop.json'
     installation = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
     folder = resolve_workspace(args.workspace, base, installation)
     Path(folder).mkdir(parents=True, exist_ok=True)
-    server = create_server(folder)
+    # A review/isolated vault must never consume the personal bot's updates.
+    server = create_server(folder, telegram=not args.isolated)
+    if args.review_server:
+        Path(args.ready_file).write_text(f'http://{server.host}/#{server.token}', encoding='utf-8')
+        try:
+            server.serve_forever()
+        finally:
+            server.backups.automatic.stop()
+            server.server_close()
+        return
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     if args.start_hidden and sys.platform == 'win32' and not args.no_tray:
@@ -173,7 +200,7 @@ def main():
         # blocks WebView2; release that thread before checking the draft.
         try:
             try:
-                unsaved = window.evaluate_js("typeof dirty !== 'undefined' && dirty")
+                unsaved = window.evaluate_js("(typeof dirty !== 'undefined' && dirty) || (typeof centralDraft !== 'undefined' && !!centralDraft.trim()) || (typeof managerHasDraft === 'function' && managerHasDraft())")
                 approved = not unsaved or window.create_confirmation_dialog('Alterações sem salvar',
                     'Existem alterações sem salvar. Deseja fechar e descartá-las?')
             except Exception:

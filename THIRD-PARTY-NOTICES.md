@@ -5338,7 +5338,7 @@ libjpeg-turbo Licenses
 libjpeg-turbo is covered by two compatible BSD-style open source licenses:
 
 - The IJG (Independent JPEG Group) License, which is listed in
-  [README.ijg](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/README.ijg)
+  [README.ijg](README.ijg)
 
   This license applies to the libjpeg API library and associated programs,
   including any code inherited from libjpeg and any modifications to that
@@ -5831,3 +5831,7 @@ freely, subject to the following restrictions:
 ### six 1.17.0
 
 Dependency sources: https://github.com/moses-palmer/pystray and https://github.com/python-pillow/Pillow . The application source and pinned requirements allow rebuilding with modified dependencies.
+
+
+## Antigravity adapter
+Adapted from neerazz/hermes-antigravity-oauth (MIT), local hardened revision from 16 October 2026. Source and original license: providers/antigravity/. Does not include Hermes or Google credentials. Antigravity CLI is a separate user-installed component.
