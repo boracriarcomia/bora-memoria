@@ -1,5 +1,13 @@
 # Bora Memória: integração local com IA
 
+## Central IA opcional — 17/10/2026
+
+O botão Central IA abre a conversa e o planejamento dentro do Bora. Requer Antigravity CLI (`agy`) instalado e conectado pelo próprio usuário. Usa Gemini 3.8 Flash Medium quando disponível na conta, por meio de adaptador derivado do plugin comunitário MIT `neerazz/hermes-antigravity-oauth`. Não exige instalar Hermes. Disponibilidade, assinatura e limites pertencem ao provedor.
+
+Ao enviar uma mensagem, o texto, até 12 mensagens anteriores, as tarefas do cofre e um recorte de notas são enviados ao Google pelo Antigravity. É possível selecionar até 20 notas; sem seleção, são escolhidas até 12 por relevância e orientação. O limite total do conteúdo de notas é 30 mil caracteres. Não representa leitura integral e atualizada de toda a base. O histórico local conserva até 100 mensagens em `.bora/config/central-ia.json`, incluído em cópias completas do cofre. As credenciais continuam no armazenamento do Antigravity, fora do cofre.
+
+Resumo do dia e prioridades são consultas sob demanda. A conversa não executa comandos, agenda trabalhos, envia mensagens, delega às outras CLIs nem conclui tarefas. Salvar conversa como nota e registrar pedido são ações explícitas no painel; os pedidos passam pelo formulário de tarefa com critérios. Uma resposta do modelo não é evidência de execução. A integração de executores será uma etapa própria.
+
 ## Autoria das consultas e alterações
 
 Depois de assumir uma tarefa com o nome do cliente (Codex, Claude, Gemini ou outro), passe `task_id` e sua própria `lease` também em `read_note` e `save_note`. O SQLite registra operação, agente da reserva, horário, resultado e revisões anterior/posterior. Falhas da operação são identificadas sem armazenar conteúdo privado ou mensagens de erro completas. O monitor concentra a animação de execução e distingue CONSULTA, ALTEROU e FALHA.
@@ -16,7 +24,7 @@ O cofre contém Markdown, anexos e configuração. Tarefas ficam em `.bora/confi
 
 ## Conectar sua IA
 
-O instalador inclui `Bora-Memoria-MCP.exe`. Configure esse programa como servidor **stdio** no cliente escolhido, com argumentos `--workspace` e o caminho absoluto do cofre. Ele não abre uma porta na internet, não pede chave de modelo e só atende ao cliente que o iniciou. O cliente precisa ter suporte MCP local. Codex, Claude Code e Gemini CLI têm esse suporte; isso não significa que toda interface web desses produtos aceite programas locais.
+O instalador inclui `Bora-Memoria-MCP-v041.exe`. Configure esse programa como servidor **stdio** no cliente escolhido, com argumentos `--workspace` e o caminho absoluto do cofre. Ele não abre uma porta na internet e só atende ao cliente que o iniciou. A ponte não pede chave de modelo. O cliente precisa ter suporte MCP local. Codex, Claude Code e Gemini CLI têm esse suporte; isso não significa que toda interface web desses produtos aceite programas locais.
 
 A ponte é independente da janela gráfica. Na versão com bandeja, fechar a janela mantém o Bora em segundo plano; use Sair para encerrar a interface e seu servidor HTTP local. Uma conexão MCP aberta pelo cliente de IA é um processo separado. Ao fechar o cliente, a ponte stdio normalmente termina com ele. Não há serviço Windows nem modelo trabalhando continuamente por conta própria.
 
@@ -24,7 +32,7 @@ Exemplo para Codex (substitua os caminhos pela sua instalação):
 
 ```toml
 [mcp_servers.bora_memoria]
-command = 'C:\MinhaInstalacao\Bora-Memoria-MCP.exe'
+command = 'C:\MinhaInstalacao\Bora-Memoria-MCP-v041.exe'
 args = ['--workspace', 'C:\MinhaInstalacao\cofre']
 ```
 
@@ -34,7 +42,7 @@ Exemplo de entrada para clientes que usam `mcpServers`, incluindo Claude e Gemin
 {
   "mcpServers": {
     "bora_memoria": {
-      "command": "C:\\MinhaInstalacao\\Bora-Memoria-MCP.exe",
+      "command": "C:\\MinhaInstalacao\\Bora-Memoria-MCP-v041.exe",
       "args": ["--workspace", "C:\\MinhaInstalacao\\cofre"]
     }
   }
@@ -42,6 +50,10 @@ Exemplo de entrada para clientes que usam `mcpServers`, incluindo Claude e Gemin
 ```
 
 Não substitua todo o arquivo de configuração do cliente: acrescente essa entrada preservando servidores existentes. Reinicie/atualize a conexão do cliente e confira a lista de ferramentas. A integração só fica ativa naquele cliente depois dessa configuração. O aplicativo não instala clientes de IA nem inclui uma assinatura deles; custos e limites do provedor continuam aplicáveis.
+
+## Consultas no mapa
+
+A lupa identifica leituras reais registradas pela ponte MCP e notas abertas no aplicativo. Mostra o cliente declarado pela reserva; sem reserva, mostra Cliente não identificado. A lupa de consulta recente permanece por oito segundos, distinguida de execução em andamento. Não usa API externa, não infere identidade e não observa programas que acessam arquivos fora da ponte.
 
 ## Trabalho e acompanhamento
 
@@ -80,3 +92,8 @@ Novos verificadores de conclusão precisam de testes de falha e critérios objet
 - [SQLite WAL](https://www.sqlite.org/wal.html)
 
 Documentação revisada em 11/10/2026. Consulte também [o guia de continuidade entre perfis](COFRE-E-PERFIS.md). A configuração de exemplo não comprova conexão nos três clientes; cada perfil precisa configurar seu cliente e consentir sua própria conexão Google.
+
+
+## Identificação automática da conexão
+
+A ponte lê clientInfo.name enviado na inicialização MCP: Codex, Claude Code, Claude, Gemini, ChatGPT ou Antigravity. O nome registra o cliente declarado e não autentica o fornecedor/modelo. Clientes com nome genérico podem definir BORA_CLIENT_NAME no env daquela conexão; não compartilhar um rótulo Codex na configuração de Claude. Na falta de metadados/configuração, usa o agente da reserva; sem identificação, mostra Cliente não identificado. client_identity informa rótulo e origem. Reservas e permissões continuam obrigatórias para ações protegidas. Reinicie a conexão MCP depois de atualizar.
